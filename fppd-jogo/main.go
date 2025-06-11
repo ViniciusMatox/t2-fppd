@@ -4,6 +4,16 @@ package main
 import "os"
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "servidor" {
+		iniciarServidor()
+		clienteID := "player1"
+		if len(os.Args) > 1 {
+			clienteID = os.Args[1]
+		}
+		executarCliente(clienteID)
+		// Inicia o cliente do jogo
+        return
+    }
 	// Inicializa a interface (termbox)
 	interfaceIniciar()
 	defer interfaceFinalizar()
