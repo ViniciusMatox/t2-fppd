@@ -2,84 +2,111 @@
 package main
 
 import (
-	"fmt"       // Usado para imprimir mensagens no terminal
-	"net"       // Usado para criar o listener de conexão TCP
-	"net/rpc"   // Biblioteca para implementar RPC (Remote Procedure Call)
+	"fmt"
+	"net"
+	"net/rpc"
 )
 
-// Struct que representa o servidor e armazena o estado do jogo
-type Servidor struct {
-	posicoes map[string][2]int // Mapa que associa cada jogador (por ID) à sua posição (X, Y)
+// Estrutura para representar comandos enviados pelos clientes
+type Comando struct {
+	ClienteID       string
+	Tecla           rune
+	SequenceNumber  int
 }
 
-// Função construtora para criar um novo servidor com o mapa de posições inicializado
+// Estrutura do estado do jogo que será enviado aos clientes
+type EstadoJogo struct {
+	Posicoes map[string][2]int
+	Status   map[string]string
+}
+
+// Estrutura principal do servidor, contendo o estado compartilhado
+type Servidor struct {
+	posicoes           map[string][2]int          // Posições dos jogadores
+	comandosProcessados map[string]map[int]bool   // Controle de execução única
+}
+
+// Construtor do servidor
 func novoServidor() *Servidor {
 	return &Servidor{
-		posicoes: make(map[string][2]int), // Inicializa o mapa de posições
+		posicoes:           make(map[string][2]int),
+		comandosProcessados: make(map[string]map[int]bool),
 	}
 }
 
-// Método chamado remotamente via RPC para processar comandos enviados pelos clientes
+// Processa um comando enviado por um cliente
 func (s *Servidor) ProcessarComando(cmd Comando, resposta *string) error {
-	// Obtém a posição atual do jogador
-	pos := s.posicoes[cmd.ClienteID]
+	fmt.Printf("Recebido comando do cliente %s: tecla=%c, seq=%d\n", cmd.ClienteID, cmd.Tecla, cmd.SequenceNumber)
+	// Inicializa o controle de sequenceNumber do cliente, se necessário
+	if _, ok := s.comandosProcessados[cmd.ClienteID]; !ok {
+		s.comandosProcessados[cmd.ClienteID] = make(map[int]bool)
+	}
 
-	// Atualiza a posição de acordo com a tecla pressionada
+	// Garante execução única (exactly-once)
+	if s.comandosProcessados[cmd.ClienteID][cmd.SequenceNumber] {
+		*resposta = "Comando duplicado ignorado"
+		return nil
+	}
+
+	// Marca o comando como processado
+	s.comandosProcessados[cmd.ClienteID][cmd.SequenceNumber] = true
+
+	// Atualiza a posição do jogador
+	pos := s.posicoes[cmd.ClienteID]
 	switch cmd.Tecla {
-	case 'w': // mover para cima
+	case 'w':
 		pos[1]--
-	case 's': // mover para baixo
+	case 's':
 		pos[1]++
-	case 'a': // mover para a esquerda
+	case 'a':
 		pos[0]--
-	case 'd': // mover para a direita
+	case 'd':
 		pos[0]++
 	}
-
-	// Atualiza a posição do jogador no mapa
 	s.posicoes[cmd.ClienteID] = pos
-
-	// Resposta informando a nova posição do jogador
 	*resposta = fmt.Sprintf("Movido para (%d, %d)", pos[0], pos[1])
-	return nil // Nenhum erro ocorreu
+	return nil
 }
 
-// Método chamado remotamente via RPC para fornecer o estado atual do jogo ao cliente
+// Fornece o estado atual do jogo ao cliente
 func (s *Servidor) ObterEstado(clienteID string, estado *EstadoJogo) error {
-	// Envia as posições de todos os jogadores
-	estado.Posicoes = s.posicoes
+	fmt.Printf("Estado solicitado por %s\n", clienteID)
 
-	// Mensagem de status para o cliente específico
-	estado.Status = map[string]string{
-		clienteID: "Status do jogador atualizado",
+	// Se é a primeira vez que esse cliente se conecta, define posição inicial
+	if _, ok := s.posicoes[clienteID]; !ok {
+		s.posicoes[clienteID] = [2]int{5, 5} // posição inicial segura
+		fmt.Printf("Cliente %s iniciado na posição (5,5)\n", clienteID)
 	}
-	return nil // Nenhum erro ocorreu
+
+	// Preenche o estado retornado ao cliente
+	estado.Posicoes = s.posicoes
+	estado.Status = map[string]string{
+		clienteID: "Estado sincronizado com sucesso",
+	}
+	return nil
 }
 
-// Função que inicia o servidor e escuta conexões RPC
-func iniciarServidor() {
-	srv := novoServidor() // Cria uma nova instância do servidor
 
-	// Registra o servidor para permitir chamadas RPC nos seus métodos
+// Inicia o servidor RPC
+func iniciarServidor() {
+	srv := novoServidor()
 	rpc.Register(srv)
 
-	// Inicia o listener TCP na porta 1234
 	listener, err := net.Listen("tcp", ":1234")
 	if err != nil {
-		panic(err) // Se não conseguir escutar na porta, o programa para com erro
+		panic(err)
 	}
-	defer listener.Close() // Garante que o listener será fechado ao final
+	defer listener.Close()
 
 	fmt.Println("Servidor iniciado na porta 1234")
 
-	// Loop principal do servidor: aceita conexões dos clientes
 	for {
-		conn, err := listener.Accept() // Aceita uma nova conexão
+		conn, err := listener.Accept()
 		if err != nil {
-			continue // Se houver erro, ignora e tenta de novo
+			continue
 		}
-
-		// Inicia uma nova goroutine para tratar a conexão RPC com o cliente
 		go rpc.ServeConn(conn)
 	}
 }
+
+// main chama iniciarServidor()

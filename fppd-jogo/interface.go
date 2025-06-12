@@ -14,8 +14,8 @@ type Cor = termbox.Attribute
 
 // Definições de cores utilizadas no jogo
 const (
-	CorPadrao     Cor = termbox.ColorDefault
-	CorCinzaEscuro    = termbox.ColorDarkGray
+	CorPadrao         = termbox.ColorDefault
+	CorCinzaEscuro    = termbox.ColorWhite
 	CorVermelho       = termbox.ColorRed
 	CorVerde          = termbox.ColorGreen
 	CorParede         = termbox.ColorBlack | termbox.AttrBold | termbox.AttrDim
@@ -66,6 +66,7 @@ func interfaceDesenharJogo(jogo *Jogo) {
 			interfaceDesenharElemento(x, y, elem)
 		}
 	}
+	interfaceDesenharElemento(5, 5, Elemento{'@', termbox.ColorRed, termbox.ColorBlack, true})
 
 	// Desenha o personagem sobre o mapa
 	interfaceDesenharElemento(jogo.PosX, jogo.PosY, Personagem)

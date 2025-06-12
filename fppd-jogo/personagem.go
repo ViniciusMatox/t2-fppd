@@ -31,6 +31,7 @@ func personagemInteragir(jogo *Jogo) {
 
 // Processa o evento do teclado e executa a ação correspondente
 func personagemExecutarAcao(ev EventoTeclado, jogo *Jogo) bool {
+	
 	switch ev.Tipo {
 	case "sair":
 		// Retorna false para indicar que o jogo deve terminar
