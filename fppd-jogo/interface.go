@@ -1,109 +1,140 @@
-// interface.go - Interface gráfica do jogo usando termbox
-// O código abaixo implementa a interface gráfica do jogo usando a biblioteca termbox-go.
-// A biblioteca termbox-go é uma biblioteca de interface de terminal que permite desenhar
-// elementos na tela, capturar eventos do teclado e gerenciar a aparência do terminal.
-
 package main
 
 import (
-	"github.com/nsf/termbox-go"
+    "fmt"
+    "github.com/nsf/termbox-go"
+    "strings"
+    "sync"
+    "time"
 )
 
-// Define um tipo Cor para encapsuladar as cores do termbox
+// Define um tipo Cor compatível com termbox
 type Cor = termbox.Attribute
 
-// Definições de cores utilizadas no jogo
+// Cores utilizadas
 const (
-	CorPadrao         = termbox.ColorDefault
-	CorCinzaEscuro    = termbox.ColorWhite
-	CorVermelho       = termbox.ColorRed
-	CorVerde          = termbox.ColorGreen
-	CorParede         = termbox.ColorBlack | termbox.AttrBold | termbox.AttrDim
-	CorFundoParede    = termbox.ColorDarkGray
-	CorTexto          = termbox.ColorDarkGray
+    CorPadrao         = termbox.ColorDefault
+    CorCinzaEscuro    = termbox.ColorWhite
+    CorVermelho       = termbox.ColorRed
+    CorVerde          = termbox.ColorGreen
+    CorParede         = termbox.ColorBlack | termbox.AttrBold | termbox.AttrDim
+    CorFundoParede    = termbox.ColorDarkGray
+    CorTexto          = termbox.ColorDarkGray
 )
 
-// EventoTeclado representa uma ação detectada do teclado (como mover, sair ou interagir)
+// EventoTeclado representa uma ação detectada do teclado
 type EventoTeclado struct {
-	Tipo  string // "sair", "interagir", "mover"
-	Tecla rune   // Tecla pressionada, usada no caso de movimento
+    Tipo  string
+    Tecla rune
 }
 
-// Inicializa a interface gráfica usando termbox
-func interfaceIniciar() {
-	if err := termbox.Init(); err != nil {
-		panic(err)
-	}
+func interfaceCapturarEvento() EventoTeclado {
+    ev := termbox.PollEvent()
+    if ev.Type == termbox.EventKey {
+        switch ev.Key {
+        case termbox.KeyEsc:
+            return EventoTeclado{Tipo: "sair"}
+        case termbox.KeySpace:
+            return EventoTeclado{Tipo: "interagir"}
+        default:
+            return EventoTeclado{Tipo: "mover", Tecla: ev.Ch}
+        }
+    }
+    return EventoTeclado{Tipo: ""}
 }
 
-// Encerra o uso da interface termbox
-func interfaceFinalizar() {
-	termbox.Close()
+// Estrutura de jogador para multiplayer
+type Jogador struct {
+    ID string
+    X  int
+    Y  int
 }
 
-// Lê um evento do teclado e o traduz para um EventoTeclado
-func interfaceLerEventoTeclado() EventoTeclado {
-	ev := termbox.PollEvent()
-	if ev.Type != termbox.EventKey {
-		return EventoTeclado{}
-	}
-	if ev.Key == termbox.KeyEsc {
-		return EventoTeclado{Tipo: "sair"}
-	}
-	if ev.Ch == 'e' {
-		return EventoTeclado{Tipo: "interagir"}
-	}
-	return EventoTeclado{Tipo: "mover", Tecla: ev.Ch}
+var (
+    jogadores   = make(map[string]Jogador)
+    jogadoresMu sync.Mutex
+    meuID       string
+    jogoLocal   Jogo
+)
+
+// iniciarInterface carrega o mapa local e exibe o jogo
+func iniciarInterface(id string, mensagens <-chan string) {
+    meuID = id
+    _ = jogoCarregarMapa("mapa.txt", &jogoLocal)
+
+    err := termbox.Init()
+    if err != nil {
+        panic(err)
+    }
+    defer termbox.Close()
+
+    go func() {
+        for msg := range mensagens {
+            processarMensagem(msg)
+        }
+    }()
+
+    ticker := time.NewTicker(100 * time.Millisecond)
+    defer ticker.Stop()
+
+    for range ticker.C {
+        desenharTela()
+    }
 }
 
-// Renderiza todo o estado atual do jogo na tela
-func interfaceDesenharJogo(jogo *Jogo) {
-	interfaceLimparTela()
+// processarMensagem trata mensagens recebidas do servidor
+func processarMensagem(msg string) {
+    partes := strings.Fields(msg)
+    if len(partes) == 0 {
+        return
+    }
 
-	// Desenha todos os elementos do mapa
-	for y, linha := range jogo.Mapa {
-		for x, elem := range linha {
-			interfaceDesenharElemento(x, y, elem)
-		}
-	}
-	interfaceDesenharElemento(5, 5, Elemento{'@', termbox.ColorRed, termbox.ColorBlack, true})
+    jogadoresMu.Lock()
+    defer jogadoresMu.Unlock()
 
-	// Desenha o personagem sobre o mapa
-	interfaceDesenharElemento(jogo.PosX, jogo.PosY, Personagem)
-
-	// Desenha a barra de status
-	interfaceDesenharBarraDeStatus(jogo)
-
-	// Força a atualização do terminal
-	interfaceAtualizarTela()
+    switch partes[0] {
+    case "NOVO", "POS":
+        if len(partes) == 4 {
+            id := partes[1]
+            x := atoi(partes[2])
+            y := atoi(partes[3])
+            jogadores[id] = Jogador{ID: id, X: x, Y: y}
+        }
+    case "SAIU":
+        if len(partes) == 2 {
+            delete(jogadores, partes[1])
+        }
+    }
 }
 
-// Limpa a tela do terminal
-func interfaceLimparTela() {
-	termbox.Clear(CorPadrao, CorPadrao)
+// desenharTela exibe o mapa e os jogadores no terminal
+func desenharTela() {
+    termbox.Clear(termbox.ColorDefault, termbox.ColorDefault)
+
+    // desenha o mapa do jogo
+    for y, linha := range jogoLocal.Mapa {
+        for x, elem := range linha {
+            termbox.SetCell(x, y, elem.simbolo, elem.cor, elem.corFundo)
+        }
+    }
+
+    // desenha os jogadores por cima do mapa
+    jogadoresMu.Lock()
+    for _, j := range jogadores {
+        cor := termbox.ColorRed
+        if j.ID == meuID {
+            cor = termbox.ColorGreen
+        }
+        termbox.SetCell(j.X, j.Y, '\u263A', cor, termbox.ColorDefault)
+    }
+    jogadoresMu.Unlock()
+
+    termbox.Flush()
 }
 
-// Força a atualização da tela do terminal com os dados desenhados
-func interfaceAtualizarTela() {
-	termbox.Flush()
+// atoi converte string para int (sem erro)
+func atoi(s string) int {
+    var i int
+    fmt.Sscanf(s, "%d", &i)
+    return i
 }
-
-// Desenha um elemento na posição (x, y)
-func interfaceDesenharElemento(x, y int, elem Elemento) {
-	termbox.SetCell(x, y, elem.simbolo, elem.cor, elem.corFundo)
-}
-
-// Exibe uma barra de status com informações úteis ao jogador
-func interfaceDesenharBarraDeStatus(jogo *Jogo) {
-	// Linha de status dinâmica
-	for i, c := range jogo.StatusMsg {
-		termbox.SetCell(i, len(jogo.Mapa)+1, c, CorTexto, CorPadrao)
-	}
-
-	// Instruções fixas
-	msg := "Use WASD para mover e E para interagir. ESC para sair."
-	for i, c := range msg {
-		termbox.SetCell(i, len(jogo.Mapa)+3, c, CorTexto, CorPadrao)
-	}
-}
-
